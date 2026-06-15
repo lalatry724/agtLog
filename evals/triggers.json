@@ -1,0 +1,18 @@
+{
+  "_comment": "觸發評估查詢：should_trigger:true 應召喚 recall；false 為近似但不該觸發。",
+  "skill_name": "recall",
+  "queries": [
+    { "query": "把這次對話的畫面文字全部存到 recall.txt", "should_trigger": true, "note": "明確要求落檔" },
+    { "query": "存畫面", "should_trigger": true, "note": "短指令" },
+    { "query": "幫我把本次 claude 的所有文字存檔", "should_trigger": true, "note": "另一措辭" },
+    { "query": "存一份這次的逐字稿", "should_trigger": true, "note": "逐字稿同義" },
+    { "query": "recall 一下這個 session", "should_trigger": true, "note": "英文措辭" },
+    { "query": "把目前對話 1:1 存成 txt", "should_trigger": true, "note": "邊界：未提 skill 名但語意吻合" },
+    { "query": "/recall", "should_trigger": true, "note": "slash 直呼" },
+    { "query": "幫我截圖這個視窗", "should_trigger": false, "note": "像素截圖，非本 skill 能力" },
+    { "query": "把這段程式碼存成 main.py", "should_trigger": false, "note": "存檔但對象是程式碼非對話" },
+    { "query": "清空畫面", "should_trigger": false, "note": "含『畫面』但意圖相反" },
+    { "query": "幫我做一份這次工作的匯報", "should_trigger": false, "note": "結構化匯報走 work-report，非逐字落檔" },
+    { "query": "把畫面字體調大", "should_trigger": false, "note": "含『畫面』但是 UI 設定" }
+  ]
+}
