@@ -7,9 +7,22 @@ set -euo pipefail
 SETTINGS="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Pick a python launcher that ACTUALLY runs. On Windows `python3` is often a
+# Microsoft Store stub that does nothing — so probe it before trusting it, and
+# fall back to `python`. The chosen name is baked into the hook command below.
+if command -v python3 >/dev/null 2>&1 && python3 -c '' >/dev/null 2>&1; then
+  PY=python3
+elif command -v python  >/dev/null 2>&1 && python  -c '' >/dev/null 2>&1; then
+  PY=python
+else
+  echo "ERROR: no working Python 3 found (tried python3, python)." >&2
+  exit 1
+fi
+
 echo "recall installer"
 echo "  settings : $SETTINGS"
 echo "  skill dir: $SKILL_DIR"
+echo "  python   : $PY"
 
 # 0) ensure settings.json exists
 mkdir -p "$(dirname "$SETTINGS")"
@@ -21,11 +34,12 @@ cp "$SETTINGS" "$BAK"
 echo "  backup   : $BAK"
 
 # 2) idempotent append + 4) verify, all in one Python pass (no jq dependency)
-SKILL_DIR="$SKILL_DIR" python3 - "$SETTINGS" <<'PY'
+SKILL_DIR="$SKILL_DIR" PY="$PY" "$PY" - "$SETTINGS" <<'PY'
 import json, os, sys
 
 path = sys.argv[1]
 skill = os.environ["SKILL_DIR"]
+pyexe = os.environ["PY"]
 with open(path, encoding="utf-8") as f:
     data = json.load(f)
 
@@ -49,7 +63,7 @@ for event, (script, timeout) in WANT.items():
     groups = hooks.setdefault(event, [])
     if already(groups, script):
         continue
-    cmd = f'python3 "{skill}/scripts/{script}"'
+    cmd = f'{pyexe} "{skill}/scripts/{script}"'
     groups.append({"hooks": [{"type": "command", "command": cmd, "timeout": timeout}]})
     added.append(event)
 

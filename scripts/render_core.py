@@ -62,6 +62,31 @@ def to_local(ts) -> str:
         return ""
 
 
+# slash command 在 jsonl 裡存成 <command-name>/foo</command-name><command-args>…</command-args>
+# （使用者實際只打了 `/foo 參數`）。還原成可讀指令，非 command 文字原樣回傳。
+_CMD_NAME_RE = re.compile(r"<command-name>\s*(.*?)\s*</command-name>", re.S)
+_CMD_ARGS_RE = re.compile(r"<command-args>\s*(.*?)\s*</command-args>", re.S)
+
+
+def clean_command_text(text: str) -> str:
+    if "<command-name>" not in text:
+        return text
+    m = _CMD_NAME_RE.search(text)
+    if not m:
+        return text
+    name = m.group(1).strip()
+    am = _CMD_ARGS_RE.search(text)
+    args = am.group(1).strip() if am else ""
+    return f"{name} {args}".strip() if args else name
+
+
+def _user_text_piece(text: str, clean_cmd: bool) -> tuple[str, str]:
+    """user 文字 → (kind, text)。命令還原成 `/cmd` 並標 kind='command'（HTML 另上色）。"""
+    if clean_cmd and "<command-name>" in text:
+        return ("command", clean_command_text(text))
+    return ("text", text)
+
+
 # ── block 渲染 ──────────────────────────────────────────────────────────────
 def _short_home(p: str) -> str:
     home = str(Path.home())
@@ -151,17 +176,21 @@ def collect(transcript: Path, view: str, include_thinking: bool = False,
             model = msg.get("model") if role == "assistant" else None
             content = msg.get("content")
 
+            # full 視圖逐字 1:1，保留原始 <command-*>；simple/talk 還原成可讀 /cmd
+            clean_cmd = role == "user" and not cfg["keep_meta"]
+
             pieces: list[tuple[str, str]] = []
             if isinstance(content, str):
                 if content.strip():
-                    pieces.append(("text", content))
+                    pieces.append(_user_text_piece(content, clean_cmd) if role == "user" else ("text", content))
             elif isinstance(content, list):
                 for b in content:
                     if not isinstance(b, dict):
                         continue
                     bt = b.get("type")
                     if bt == "text" and b.get("text", "").strip():
-                        pieces.append(("text", b["text"]))
+                        pieces.append(_user_text_piece(b["text"], clean_cmd) if role == "user"
+                                      else ("text", b["text"]))
                     elif bt == "thinking" and cfg["think"] and include_thinking:
                         pieces.append(("thinking", f"🧠 [THINKING]\n{b.get('thinking', '')}"))
                     elif bt == "tool_use":
@@ -207,7 +236,12 @@ def emit_txt(turns: list[dict], view: str, show_ts: bool = True) -> str:
         else:
             out.append(hdr)
             for kind, text in t["pieces"]:
-                out.append(f"  • {text}" if kind == "tool" else text.rstrip())
+                if kind == "tool":
+                    out.append(f"  • {text}")
+                elif kind == "command":
+                    out.append(f"⌘ {text.rstrip()}")
+                else:
+                    out.append(text.rstrip())
             out.append("")
     return "\n".join(out) + "\n"
 
@@ -230,15 +264,85 @@ def _esc_paths(text: str) -> str:
     return "".join(out)
 
 
+# ── markdown 表格 → HTML <table>（僅 simple/talk；full 逐字保留）──────────────
+def _md_cells(line: str) -> list[str]:
+    """`| a | b |` → ['a','b']（剝除首尾 pipe，逐格 strip）。"""
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+
+def _is_md_sep(line: str) -> bool:
+    """表格分隔列：`|---|:--:|` 各格只含 - 與選用對齊冒號。"""
+    if "|" not in line:
+        return False
+    cells = _md_cells(line)
+    return bool(cells) and any(cells) and all(re.fullmatch(r":?-+:?", c) for c in cells if c)
+
+
+def _md_table_html(header: str, sep: str, rows: list[str]) -> str:
+    aligns = []
+    for c in _md_cells(sep):
+        l, r = c.startswith(":"), c.endswith(":")
+        aligns.append("center" if l and r else "right" if r else "left" if l else "")
+
+    def cell(c: str, tag: str, i: int) -> str:
+        a = aligns[i] if i < len(aligns) else ""
+        st = f" style='text-align:{a}'" if a else ""
+        return f"<{tag}{st}>{_esc_paths(c)}</{tag}>"
+
+    out = ["<table class='md'><thead><tr>"]
+    out += [cell(c, "th", i) for i, c in enumerate(_md_cells(header))]
+    out.append("</tr></thead><tbody>")
+    for row in rows:
+        out.append("<tr>")
+        out += [cell(c, "td", i) for i, c in enumerate(_md_cells(row))]
+        out.append("</tr>")
+    out.append("</tbody></table>")
+    return "".join(out)
+
+
+def _render_text_html(text: str) -> str:
+    """text piece → HTML：連續 markdown 表格區塊轉 <table>，其餘原樣（路徑高亮 + pre-wrap）。
+    ``` code fence 內不轉。"""
+    lines = text.split("\n")
+    out: list[str] = []
+    buf: list[str] = []
+    fence = False
+    i, n = 0, len(lines)
+
+    def flush():
+        if buf:
+            out.append(_esc_paths("\n".join(buf)))
+            buf.clear()
+
+    while i < n:
+        line = lines[i]
+        if line.strip().startswith("```"):
+            fence = not fence
+            buf.append(line); i += 1; continue
+        if not fence and "|" in line and i + 1 < n and _is_md_sep(lines[i + 1]):
+            j = i + 2
+            rows = []
+            while j < n and lines[j].strip() and "|" in lines[j] and not _is_md_sep(lines[j]):
+                rows.append(lines[j]); j += 1
+            flush()
+            out.append(_md_table_html(line, lines[i + 1], rows))
+            i = j
+            continue
+        buf.append(line); i += 1
+    flush()
+    return "".join(out)
+
+
 _HTML_CSS = """
 :root{--bg:#1e1e2e;--fg:#cdd6f4;--user:#89dceb;--asst:#a6e3a1;--tool:#f9e2af;
---result:#9399b2;--think:#cba6f7;--line:#45475a;--path:#89b4fa;--ts:#6c7086;}
+--result:#9399b2;--think:#cba6f7;--line:#45475a;--path:#89b4fa;--ts:#6c7086;--cmd:#fab387;}
 *{box-sizing:border-box}
 body{background:var(--bg);color:var(--fg);margin:0;padding:24px;max-width:1000px;
 margin:0 auto;font:14px/1.6 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 h1{font-size:15px;border-bottom:1px solid var(--line);padding-bottom:8px;margin:0 0 20px}
-.turn{border-left:3px solid var(--line);padding:6px 0 6px 12px;margin:14px 0}
-.turn.user{border-left-color:var(--user)}.turn.assistant{border-left-color:var(--asst)}
+.turn{border-left:3px solid var(--line);padding:8px 12px;margin:14px 0;border-radius:0 6px 6px 0}
+.turn.user{border-left-color:var(--user);background:#16233d}
+.turn.assistant{border-left-color:var(--asst);background:#1a2a1c}
 .role{font-weight:700;margin-bottom:6px}
 .user .role{color:var(--user)}.assistant .role{color:var(--asst)}
 .ts{color:var(--ts);font-weight:400}
@@ -247,11 +351,17 @@ h1{font-size:15px;border-bottom:1px solid var(--line);padding-bottom:8px;margin:
 .piece.tool_use{color:var(--tool);background:#181825;padding:8px 10px;border-radius:6px}
 .piece.tool_result{color:var(--result);background:#181825;padding:8px 10px;border-radius:6px}
 .piece.thinking{color:var(--think);font-style:italic}
+.piece.command{color:var(--cmd);font-weight:600}.piece.command::before{content:'⌘ '}
 .path{color:var(--path)}
+table.md{border-collapse:collapse;margin:8px 0;white-space:normal;max-width:100%}
+table.md th,table.md td{border:1px solid var(--line);padding:4px 10px;text-align:left;vertical-align:top}
+table.md th{color:var(--user);background:#181825;font-weight:700}
 """.strip()
 
 
 def emit_html(turns: list[dict], view: str, title: str, show_ts: bool = True) -> str:
+    # full 視圖逐字 1:1；simple/talk 把 markdown 表格轉成真表格
+    convert_tables = view != "full"
     out = ["<!DOCTYPE html><html lang='zh-Hant'><head><meta charset='utf-8'>",
            f"<title>{html.escape(title)}</title><style>{_HTML_CSS}</style></head><body>",
            f"<h1>{html.escape(title)}</h1>"]
@@ -260,7 +370,8 @@ def emit_html(turns: list[dict], view: str, title: str, show_ts: bool = True) ->
         ts_html = f"<span class='ts'>[{html.escape(t['ts'])}]</span> " if (show_ts and t["ts"]) else ""
         out.append(f"<div class='turn {html.escape(role)}'><div class='role'>{ts_html}{html.escape(role_label(t))}</div>")
         for kind, text in t["pieces"]:
-            out.append(f"<div class='piece {html.escape(kind)}'>{_esc_paths(text)}</div>")
+            inner = _render_text_html(text) if (kind == "text" and convert_tables) else _esc_paths(text)
+            out.append(f"<div class='piece {html.escape(kind)}'>{inner}</div>")
         out.append("</div>")
     out.append("</body></html>")
     return "\n".join(out) + "\n"

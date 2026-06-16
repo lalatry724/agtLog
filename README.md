@@ -19,6 +19,10 @@ It is a **thin wrapper over deterministic Python**: the rendering core (`render_
 
 Requires Python 3 (standard library only — no third-party packages). Works on macOS / Linux / Windows.
 
+> **Python command differs by OS.** macOS / Linux use `python3`. On **Windows** the bundled Python installs as **`python`**, and a bare `python3` is usually a Microsoft Store stub that silently does nothing — so use `python` everywhere on Windows. `install.sh` auto-detects this (it probes each launcher and bakes the working one into the hook command).
+
+### macOS / Linux
+
 1. Copy this folder into your skills directory:
    ```bash
    cp -r recall ~/.claude/skills/recall
@@ -29,10 +33,34 @@ Requires Python 3 (standard library only — no third-party packages). Works on 
    ```
    This backs up `~/.claude/settings.json`, then **appends** the SessionStart/SessionEnd hooks idempotently (existing hooks untouched).
 
-You can also just run the CLI directly without installing it as a skill:
+Run the CLI directly without installing it as a skill:
 ```bash
 python3 path/to/scripts/recall.py --scope all
 ```
+
+### Windows
+
+1. Copy this folder into your skills directory (PowerShell):
+   ```powershell
+   Copy-Item -Recurse -Force recall "$env:USERPROFILE\.claude\skills\recall"
+   ```
+2. (Optional) Enable auto-archiving hooks. `install.sh` is a bash script, so run it from **Git Bash** (ships with Git for Windows):
+   ```bash
+   bash ~/.claude/skills/recall/install.sh
+   ```
+   It detects that `python` (not `python3`) is the working launcher and writes the hook commands accordingly. If you have no bash, register the two hooks in `%USERPROFILE%\.claude\settings.json` manually, using `python "<skill>/scripts/<hook>.py"`.
+
+Run the CLI directly without installing it as a skill:
+```powershell
+python path\to\scripts\recall.py --scope all
+```
+
+| | macOS / Linux | Windows |
+|---|---|---|
+| Python command | `python3` | `python` (bare `python3` is a no-op Store stub) |
+| Copy folder | `cp -r recall ~/.claude/skills/recall` | `Copy-Item -Recurse -Force recall "$env:USERPROFILE\.claude\skills\recall"` |
+| Run `install.sh` | native shell | **Git Bash** required |
+| Hook command written | `python3 "…"` | `python "…"` (auto-detected) |
 
 ## Usage
 
@@ -122,6 +150,13 @@ recall/
 
 This project follows [Semantic Versioning](https://semver.org/). Newest first.
 
+### 1.1.0 — 2026-06-16 · Readability & cross-platform
+- **Slash commands restored** — a user `/command args` stored as `<command-name>…</command-args>` is rendered back as the typed `/command args` (simple/talk) with its own color (`⌘`-prefixed); `full` keeps the raw tags verbatim. The command also becomes the filename's first-prompt slug.
+- **Markdown tables → HTML tables** — contiguous `| … |` blocks render as real `<table>` (borders, header tint, column alignment) in simple/talk; `full` keeps them verbatim; code-fence content untouched.
+- **Per-role backgrounds** — user / assistant turns get distinct solid block backgrounds (deep blue / deep green), not just a left border.
+- **Filenames include the first message's time** — `<date>_<HH-MM-SS>_<slug>_<id8>` (was date-only); colons swapped for `-` for Windows.
+- **Cross-platform install** — README splits macOS/Linux vs Windows (`python3` vs `python`, `cp -r` vs `Copy-Item`, Git Bash for `install.sh`); `install.sh` now probes for a working Python launcher and bakes it into the hook command (fixes the Windows `python3` Store-stub trap).
+
 ### 1.0.0 — 2026-06-15 · First public release
 Consolidates the internal development milestones into one public release:
 - **Three views** — `full` (verbatim + tools + results) / `simple` (one-line tools) / `talk` (pure conversation), with local timestamps and path highlighting.
@@ -157,12 +192,33 @@ MIT — see [LICENSE](LICENSE).
 - ❌ **不**抓終端機像素級截圖。HTML 顏色依元素類型上色，非還原螢幕色票。
 
 ### 安裝
-需要 Python 3（純標準庫）。把本資料夾複製到技能目錄：
+需要 Python 3（純標準庫）。
+
+> **Python 指令依系統不同**：mac / Linux 用 `python3`；**Windows 用 `python`**（裸 `python3` 多半是 Microsoft Store 跳板，會靜默失效）。`install.sh` 會自動偵測（逐一試跑 launcher，把能用的那個寫進 hook 指令）。
+
+**mac / Linux：**
 ```bash
 cp -r recall ~/.claude/skills/recall
 bash ~/.claude/skills/recall/install.sh   # 選用：啟用自動歸檔 hook
 ```
+
+**Windows（PowerShell 複製 + Git Bash 跑 install）：**
+```powershell
+Copy-Item -Recurse -Force recall "$env:USERPROFILE\.claude\skills\recall"
+```
+```bash
+bash ~/.claude/skills/recall/install.sh   # 在 Git Bash 內跑；自動用 python 而非 python3
+```
+沒有 bash → 手動把兩個 hook 寫進 `%USERPROFILE%\.claude\settings.json`，指令用 `python "<skill>/scripts/<hook>.py"`。
+
 `install.sh` 會先備份 `~/.claude/settings.json`，再**冪等 append** 兩個 hook（既有 hook 不動）。
+
+| | mac / Linux | Windows |
+|---|---|---|
+| Python 指令 | `python3` | `python`（`python3` 是空跳板）|
+| 複製資料夾 | `cp -r …` | `Copy-Item -Recurse -Force …` |
+| 跑 `install.sh` | 原生 shell | 需 **Git Bash** |
+| hook 寫入的指令 | `python3 "…"` | `python "…"`（自動偵測）|
 
 ### 三視圖
 - **simple**（預設）：對話＋工具單行摘要，適合回顧、找未處理項目。
@@ -180,6 +236,7 @@ python3 scripts/recall.py --scope init-all
 
 ### 變更紀錄
 採[語意化版號](https://semver.org/)，完整內容見上方 [Changelog](#changelog)。
+- **1.1.0（2026-06-16）可讀性與跨平台**：slash command 還原成 `/cmd args` 並上色（full 保留原始標籤）、markdown 表格轉真 `<table>`（full 逐字）、user/assistant 整塊深藍/深綠底色區分、檔名加首則訊息時間 `HH-MM-SS`、README 拆 mac/Windows 安裝差異 + `install.sh` 自動偵測 `python`/`python3`。
 - **1.0.0（2026-06-15）首次公開**：三視圖（full/simple/talk）、scope current/all/init-all、init_all 補建全部歷史（冪等 + index）、simple/talk 分資料夾版面、SessionEnd/SessionStart 自動歸檔 hook（install.sh 安裝）、單一渲染核心 render_core.py。
 
 ### 授權

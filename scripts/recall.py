@@ -93,7 +93,7 @@ def _session_meta(transcript: Path) -> dict:
                             if isinstance(b, dict) and b.get("type") == "text":
                                 text = b.get("text", "")
                                 break
-                    text = text.strip()
+                    text = rc.clean_command_text(text.strip())
                     if text and not text.startswith("<"):
                         first_prompt = text
     except Exception:
@@ -105,6 +105,16 @@ def _session_meta(transcript: Path) -> dict:
 def _slugify(text: str, limit: int = 40) -> str:
     s = re.sub(r"[^0-9A-Za-z一-鿿]+", "-", text).strip("-")
     return (s[:limit] or "session").rstrip("-")
+
+
+def _archive_base(start: str, title: str, stem: str) -> str:
+    """歸檔檔名前綴：<date>_<HH-MM-SS>_<slug>_<id8>。
+    time 取自 session 首則訊息時間（start 的時分秒），冒號換成 - 以相容 Windows 檔名。
+    start 缺時間段時退回只有日期。"""
+    date = start[:10]
+    t = start[11:19].replace(":", "-") if len(start) >= 19 else ""
+    stamp = f"{date}_{t}" if t else date
+    return f"{stamp}_{_slugify(title)}_{stem[:8]}"
 
 
 def run_all(projects_dir, output_dir, view, fmt, show_ts, include_thinking,
@@ -130,9 +140,8 @@ def run_all(projects_dir, output_dir, view, fmt, show_ts, include_thinking,
             meta = _session_meta(jl)
             # 日期/排序鍵優先用 session 起始時間，缺則退回檔案 mtime
             start = meta["start"] or datetime.fromtimestamp(jl.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-            date = start[:10]
             title = meta["first_prompt"]
-            fname = f"{date}_{_slugify(title)}_{jl.stem[:8]}.{ext}"
+            fname = f"{_archive_base(start, title, jl.stem)}.{ext}"
             (out_dir / proj).mkdir(parents=True, exist_ok=True)
             (out_dir / proj / fname).write_text(body, encoding="utf-8")
             records.append({"project": proj, "start": start, "end": meta["end"],
@@ -225,9 +234,8 @@ def run_init_all(projects_dir, archive_dir, views, fmt, show_ts, include_subagen
         try:
             meta = _session_meta(jl)
             start = meta["start"] or datetime.fromtimestamp(jl.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
-            date = start[:10]
             title = meta["first_prompt"]
-            base = f"{date}_{_slugify(title)}_{jl.stem[:8]}"
+            base = _archive_base(start, title, jl.stem)
             view_rels: dict[str, str] = {}
             turns_seen = 0
             for view in views:

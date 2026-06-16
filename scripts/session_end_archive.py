@@ -49,7 +49,7 @@ def main() -> int:
         return 0
 
     import render_core as rc
-    from recall import run_current, _session_meta, _slugify
+    from recall import run_current, _session_meta, _archive_base
 
     cwd = payload.get("cwd") or ""
     session_id = payload.get("session_id") or ""
@@ -70,11 +70,10 @@ def main() -> int:
         if not meta["start"]:  # 空 session 不歸檔
             return 0
         proj = rc.encode_project_dirname(cwd).lstrip("-") if cwd else "unknown"
-        date = meta["start"][:10]
         fmt = conf.get("format", "html")
         ext = "html" if fmt == "html" else "txt"
         archive_root = Path(conf["archive_dir"]).expanduser()
-        base = f"{date}_{_slugify(meta['first_prompt'])}_{transcript.stem[:8]}"
+        base = _archive_base(meta["start"], meta["first_prompt"], transcript.stem)
         for view in conf.get("views", ["simple", "talk"]):  # 各 view 各自一資料夾
             archive = archive_root / proj / view             # <archive>/<專案>/<view>/
             archive.mkdir(parents=True, exist_ok=True)
