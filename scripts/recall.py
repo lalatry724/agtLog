@@ -117,6 +117,17 @@ def _archive_base(start: str, title: str, stem: str) -> str:
     return f"{stamp}_{_slugify(title)}_{stem[:8]}"
 
 
+def archive_filename(base: str, view: str, ext: str) -> str:
+    """歸檔檔名（扁平結構，無 view 子資料夾）：
+    預設 talk 不加後綴（直放專案資料夾）；其餘 view 加 .<view> 後綴避免同名碰撞。
+      talk   → <base>.html
+      simple → <base>.simple.html
+      full   → <base>.full.html
+    """
+    suffix = "" if view == "talk" else f".{view}"
+    return f"{base}{suffix}.{ext}"
+
+
 def run_all(projects_dir, output_dir, view, fmt, show_ts, include_thinking,
             include_subagents, max_result_chars, arg_width) -> dict:
     projects = Path(projects_dir).expanduser()
@@ -203,7 +214,7 @@ def _range(r: dict) -> str:
 # ── init-all：補建全部歷史，與 session-archive 合一 ─────────────────────────
 def _load_archive_conf() -> dict:
     """讀 skill 根的 archive.conf.json（與 hook 同一份設定）。缺則用預設。"""
-    conf = {"archive_dir": "~/.claude/session-archive", "views": ["simple", "talk"]}
+    conf = {"archive_dir": "~/.claude/session-archive", "views": ["talk"]}
     cfg = Path(__file__).resolve().parent.parent / "archive.conf.json"
     try:
         if cfg.is_file():
@@ -214,8 +225,8 @@ def _load_archive_conf() -> dict:
 
 
 def run_init_all(projects_dir, archive_dir, views, fmt, show_ts, include_subagents, force) -> dict:
-    """掃 ~/.claude/projects 全部 session，對每個 view 生一份，落到
-    <archive>/<專案>/<view>/<date>_<slug>_<id8>.<ext>，與 SessionEnd hook 同一棵。
+    """掃 ~/.claude/projects 全部 session，對每個 view 生一份，扁平落到
+    <archive>/<專案>/<date>_<slug>_<id8>[.<view>].<ext>（talk 不加後綴），與 SessionEnd hook 同一棵。
     冪等：檔已存在則不重寫（--force 強制重建）。最後產頂層 index。"""
     projects = Path(projects_dir).expanduser()
     root = Path(archive_dir).expanduser()
@@ -245,14 +256,15 @@ def run_init_all(projects_dir, archive_dir, views, fmt, show_ts, include_subagen
                 if turns == 0:
                     continue
                 turns_seen = max(turns_seen, turns)
-                out_path = root / proj / view / f"{base}.{ext}"
+                fname = archive_filename(base, view, ext)
+                out_path = root / proj / fname
                 if out_path.exists() and not force:
                     skipped += 1
                 else:
                     out_path.parent.mkdir(parents=True, exist_ok=True)
                     out_path.write_text(body, encoding="utf-8")
                     written += 1
-                view_rels[view] = f"{proj}/{view}/{base}.{ext}"
+                view_rels[view] = f"{proj}/{fname}"
             if not view_rels:
                 continue
             records.append({"project": proj, "start": start, "end": meta["end"],
@@ -294,7 +306,7 @@ def _init_index(records: list[dict], views: list[str], fmt: str) -> str:
     out = ["<!DOCTYPE html><html lang='zh-Hant'><head><meta charset='utf-8'>",
            f"<title>歷史對話歸檔索引</title><style>{css}</style></head><body>",
            "<h1>Claude Code 歷史對話歸檔索引</h1>",
-           f"<p class='meta'>共 {len(records)} 個 session（依專案、組內新→舊）· 每列附 simple/talk 連結</p>"]
+           f"<p class='meta'>共 {len(records)} 個 session（依專案、組內新→舊）· 每列附 {'/'.join(views)} 連結</p>"]
     cur = None
     for r in records:
         if r["project"] != cur:
@@ -311,7 +323,8 @@ def _init_index(records: list[dict], views: list[str], fmt: str) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--scope", choices=["current", "all", "init-all"], default="current")
-    ap.add_argument("--view", choices=["full", "simple", "talk"], default="simple")
+    ap.add_argument("--view", choices=["full", "simple", "talk"], default="talk")
+    ap.add_argument("--views", help="init-all 專用：逗號分隔多 view 覆寫 conf（例 simple,talk,full）")
     ap.add_argument("--format", choices=["html", "txt"], default="html")
     ap.add_argument("--timestamps", dest="timestamps", action="store_true", default=True)
     ap.add_argument("--no-timestamps", dest="timestamps", action="store_false")
@@ -334,7 +347,10 @@ def main() -> int:
     elif args.scope == "init-all":
         conf = _load_archive_conf()
         archive_dir = args.output_dir or conf.get("archive_dir", "~/.claude/session-archive")
-        views = conf.get("views", ["simple", "talk"])
+        if args.views:  # CLI 覆寫：產 simple/all 版本，例 --views simple,talk,full
+            views = [v.strip() for v in args.views.split(",") if v.strip()]
+        else:
+            views = conf.get("views", ["talk"])
         result = run_init_all(args.projects_dir, archive_dir, views, args.format,
                               args.timestamps, args.include_subagents, args.force)
     else:

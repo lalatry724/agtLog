@@ -1,7 +1,7 @@
 {
   "enabled": true,
   "archive_dir": "~/.claude/session-archive",
-  "views": ["simple", "talk"],
+  "views": ["talk"],
   "format": "html",
   "timestamps": true
 }

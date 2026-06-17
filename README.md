@@ -70,8 +70,9 @@ python3 scripts/recall.py [options]
 
 | Option | Values (default) | Meaning |
 |--------|------------------|---------|
-| `--scope` | **current** / all / init-all | Current session / all → `./session-export/` / all → `~/.claude/session-archive/<project>/<view>/` (+ index) |
-| `--view` | full / **simple** / talk | Verbatim+tools / tools as one-liners / pure conversation |
+| `--scope` | **current** / all / init-all | Current session / all → `./session-export/` / all → `~/.claude/session-archive/<project>/` (+ index) |
+| `--view` | full / simple / **talk** | Verbatim+tools / tools as one-liners / pure conversation (default) |
+| `--views` | — | init-all only: comma list overriding conf, e.g. `simple,talk,full` |
 | `--format` | **html** / txt | Colored HTML by default |
 | `--timestamps` / `--no-timestamps` | **on** | Prefix each turn with local time `[YYYY-MM-DD HH:MM:SS]` |
 | `--include-thinking` | off | Include thinking blocks in the `full` view |
@@ -83,30 +84,34 @@ python3 scripts/recall.py [options]
 
 Common:
 ```bash
-python3 scripts/recall.py                  # current session → recall-simple.html
-python3 scripts/recall.py --view talk      # pure conversation (cleanest)
-python3 scripts/recall.py --scope all      # all history → ./session-export/ + index.html
-python3 scripts/recall.py --scope init-all # backfill all history into the archive + index.html
+python3 scripts/recall.py                       # current session → recall-talk.html (talk, default)
+python3 scripts/recall.py --view simple         # conversation + one-line tool summaries
+python3 scripts/recall.py --view full           # verbatim + tool bodies + results
+python3 scripts/recall.py --scope all           # all history → ./session-export/ + index.html
+python3 scripts/recall.py --scope init-all      # backfill all history (talk) into the archive + index.html
+python3 scripts/recall.py --scope init-all --views simple,talk,full   # backfill all three views
 ```
 
 Output is a JSON status line on stdout (`status == "ok"` on success, with `output`/`turns`).
 
 ### The three views
 
-- **simple** (default): conversation + one-line tool summaries (`• Update(file)`). Best for **review / finding loose ends**. Filters injected meta messages, merges consecutive same-role turns.
-- **talk**: only user/assistant text, no tools. Best for **reading the narrative**.
+- **talk** (default): only user/assistant text, no tools. Best for **reading the narrative** — the cleanest, lowest-noise view.
+- **simple**: conversation + one-line tool summaries (`• Update(file)`). Best for **review / finding loose ends**. Filters injected meta messages, merges consecutive same-role turns.
 - **full**: verbatim, tool commands + results, meta preserved, 1:1. Best for **audit / reproduction**.
+
+To get **simple / full / all** views: pass `--view simple` / `--view full` (current/all), `--views simple,talk,full` (init-all), or set `views` in `archive.conf.json` for the auto-archive hook.
 
 ### scope=all vs scope=init-all
 
 - `--scope all` writes one chosen view into `./session-export/` in the current directory — a throwaway export.
-- `--scope init-all` backfills **all history** into `~/.claude/session-archive/<project>/<view>/`, always simple+talk, **merged with the auto-archive tree** so past and future conversations live together. Idempotent (skips existing files; `--force` rebuilds). Re-run anytime to refresh the index and pick up new sessions.
+- `--scope init-all` backfills **all history** into `~/.claude/session-archive/<project>/` (flat, talk by default; `--views` to add more), **merged with the auto-archive tree** so past and future conversations live together. Multiple views are disambiguated by filename suffix (`<base>.html` / `<base>.simple.html` / `<base>.full.html`). Idempotent (skips existing files; `--force` rebuilds). Re-run anytime to refresh the index and pick up new sessions.
 
 ## Auto-archive
 
 Two optional Claude Code hooks (registered by `install.sh` into `~/.claude/settings.json`):
 
-- **SessionEnd** → `scripts/session_end_archive.py`: on session end, save the conversation as **simple + talk HTML** to `~/.claude/session-archive/<project>/<view>/`. *fail-open* — any error exits silently, never blocking session end.
+- **SessionEnd** → `scripts/session_end_archive.py`: on session end, save the conversation as **talk HTML** (default) to `~/.claude/session-archive/<project>/` (flat, no view subfolder). *fail-open* — any error exits silently, never blocking session end. To also archive simple/full, set `"views": ["simple","talk"]` (or add `"full"`).
 - **SessionStart** → `scripts/session_start_reminder.py`: a one-line reminder that archiving is on and where files go.
 
 Behavior is controlled by `archive.conf.json`:
@@ -114,12 +119,24 @@ Behavior is controlled by `archive.conf.json`:
 {
   "enabled": true,
   "archive_dir": "~/.claude/session-archive",
-  "views": ["simple", "talk"],
+  "views": ["talk"],
   "format": "html",
   "timestamps": true
 }
 ```
 Set `"enabled": false` to turn archiving off without removing the hooks.
+
+### Regenerate / backfill / rebuild
+
+The SessionEnd hook only fires **when a session ends** — it never re-scans history by itself, so gaps happen (hook disabled, a crash, sessions from before install). `--scope init-all` is the scan/backfill mechanism:
+
+| Goal | Command | Behavior |
+|------|---------|----------|
+| **Backfill** missing sessions | `recall.py --scope init-all` | Scans all history; writes only missing files, **skips existing** (idempotent — re-run anytime). |
+| **Rebuild** all (e.g. after a render change) | `recall.py --scope init-all --force` | Rewrites every file, ignoring what exists. |
+| Re-archive one session | `recall.py --transcript <jsonl> --output <path>` | Always overwrites that one file. |
+
+Files are keyed by `<date>_<time>_<slug>_<id8>`, so `init-all` matches by name and skips duplicates. There's no automatic periodic backfill — run `init-all` manually (or wire it into your own cron/hook) to catch up.
 
 ## Repository layout
 
@@ -148,7 +165,13 @@ recall/
 
 ## Changelog
 
-This project follows [Semantic Versioning](https://semver.org/). Newest first.
+This project follows [Semantic Versioning](https://semver.org/). Newest first. Full history: [`version.md`](version.md).
+
+### 1.2.0 — 2026-06-17 · Flat archive, talk by default
+- **Flat archive layout** — dropped the per-view subfolders: archives now land directly at `~/.claude/session-archive/<project>/` instead of `<project>/<view>/`.
+- **Talk is the default view** — both the SessionEnd hook and `recall.py` (current / init-all) now produce only the **talk** view by default (`--view` default `simple`→`talk`, `archive.conf.json` `views` `["simple","talk"]`→`["talk"]`).
+- **Multiple views still supported, flat** — when more than one view is produced, files are disambiguated by suffix: `<base>.html` (talk), `<base>.simple.html`, `<base>.full.html`. Use `--view simple|full` (current/all), `--views simple,talk,full` (init-all), or `archive.conf.json` `views`.
+- **Existing archives migrated** — old `<project>/simple/` + `<project>/talk/` trees flattened (simple dropped, talk files moved up), index rebuilt.
 
 ### 1.1.0 — 2026-06-16 · Readability & cross-platform
 - **Slash commands restored** — a user `/command args` stored as `<command-name>…</command-args>` is rendered back as the typed `/command args` (simple/talk) with its own color (`⌘`-prefixed); `full` keeps the raw tags verbatim. The command also becomes the filename's first-prompt slug.
@@ -221,21 +244,36 @@ bash ~/.claude/skills/recall/install.sh   # 在 Git Bash 內跑；自動用 pyth
 | hook 寫入的指令 | `python3 "…"` | `python "…"`（自動偵測）|
 
 ### 三視圖
-- **simple**（預設）：對話＋工具單行摘要，適合回顧、找未處理項目。
-- **talk**：只有對話文字，適合純脈絡整理。
+- **talk**（預設）：只有對話文字、隱藏工具，最乾淨，適合純脈絡整理。
+- **simple**：對話＋工具單行摘要，適合回顧、找未處理項目。
 - **full**：逐字＋工具本文＋結果，1:1 還原，適合稽核重現。
+
+要產 **simple / full / 全部** 版本：current/all 用 `--view simple`｜`--view full`；init-all 用 `--views simple,talk,full`；自動歸檔改 `archive.conf.json` 的 `views`。
 
 ### init_all（補建全部歷史）
 ```bash
-python3 scripts/recall.py --scope init-all
+python3 scripts/recall.py --scope init-all                          # 預設只補 talk
+python3 scripts/recall.py --scope init-all --views simple,talk,full # 補三視圖
 ```
-把全部歷史補建到 `~/.claude/session-archive/<專案>/<view>/`，固定 simple+talk，**與自動歸檔合一**（過去+未來同一棵），並產頂層 `index.html`（每列附 simple/talk 雙連結）。**冪等**：已存在跳過（`--force` 強制重建），隨時重跑刷新索引。
+把全部歷史補建到 `~/.claude/session-archive/<專案>/`（扁平、預設 talk），**與自動歸檔合一**（過去+未來同一棵），並產頂層 `index.html`。多視圖以檔名後綴區分（`<base>.html`／`<base>.simple.html`／`<base>.full.html`）。**冪等**：已存在跳過（`--force` 強制重建），隨時重跑刷新索引。
 
 ### 自動歸檔設定
-由 `archive.conf.json` 控（`enabled` / `archive_dir` / `views` / `format` / `timestamps`）。要關閉把 `enabled` 設 `false` 即可。
+由 `archive.conf.json` 控（`enabled` / `archive_dir` / `views` / `format` / `timestamps`）。預設只產 talk；要連 simple/full 一起存，把 `views` 設成 `["simple","talk"]`（或加 `"full"`）。要關閉把 `enabled` 設 `false` 即可。
+
+### 重產 / 補產 / 重建
+SessionEnd hook **只在 session 結束當下產**，不會自己回掃歷史，所以會有缺口（hook 曾停用、當機、安裝前的舊 session）。掃描補產機制就是 `--scope init-all`：
+
+| 目的 | 指令 | 行為 |
+|------|------|------|
+| **補產**漏掉的 session | `recall.py --scope init-all` | 掃全歷史，只寫缺檔、**已存在跳過**（冪等，可隨時重跑） |
+| **重建**全部（改了 render 邏輯後） | `recall.py --scope init-all --force` | 忽略既有，全部重寫 |
+| 重產單一 session | `recall.py --transcript <jsonl> --output <path>` | 直接覆寫該檔 |
+
+檔名以 `<date>_<time>_<slug>_<id8>` 為鍵，故 `init-all` 靠檔名比對跳過重複。**無自動定期補產**——需手動跑 `init-all`（或自行接 cron/hook）來補上。
 
 ### 變更紀錄
-採[語意化版號](https://semver.org/)，完整內容見上方 [Changelog](#changelog)。
+採[語意化版號](https://semver.org/)，完整內容見上方 [Changelog](#changelog) 與 [`version.md`](version.md)。
+- **1.2.0（2026-06-17）扁平歸檔、預設 talk**：歸檔結構去掉 view 子資料夾（改 `<專案>/` 直放）、SessionEnd 與 recall.py 預設只產 talk（`--view` 預設改 talk、conf `views` 改 `["talk"]`）、多視圖以檔名後綴 `.simple`/`.full` 區分、既有歸檔一次性扁平化並重建 index。
 - **1.1.0（2026-06-16）可讀性與跨平台**：slash command 還原成 `/cmd args` 並上色（full 保留原始標籤）、markdown 表格轉真 `<table>`（full 逐字）、user/assistant 整塊深藍/深綠底色區分、檔名加首則訊息時間 `HH-MM-SS`、README 拆 mac/Windows 安裝差異 + `install.sh` 自動偵測 `python`/`python3`。
 - **1.0.0（2026-06-15）首次公開**：三視圖（full/simple/talk）、scope current/all/init-all、init_all 補建全部歷史（冪等 + index）、simple/talk 分資料夾版面、SessionEnd/SessionStart 自動歸檔 hook（install.sh 安裝）、單一渲染核心 render_core.py。
 

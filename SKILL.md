@@ -30,8 +30,9 @@ python3 scripts/recall.py [options]
 
 | Option | Values (default) | Meaning |
 |--------|------------------|---------|
-| `--scope` | **current** / all / init-all | Current session / all → `./session-export/` / all → `~/.claude/session-archive/<project>/<view>/` (+ index) |
-| `--view` | full / **simple** / talk | Verbatim+tools / tools one-liner / pure conversation |
+| `--scope` | **current** / all / init-all | Current session / all → `./session-export/` / all → `~/.claude/session-archive/<project>/` (+ index) |
+| `--view` | full / simple / **talk** | Verbatim+tools / tools one-liner / pure conversation (default) |
+| `--views` | — | init-all only: comma list overriding conf (e.g. `simple,talk,full`) |
 | `--format` | **html** / txt | Colored HTML by default |
 | `--timestamps` / `--no-timestamps` | **on** | Prefix each turn with local time |
 | `--include-thinking` | off | Include thinking in `full` |
@@ -43,20 +44,24 @@ python3 scripts/recall.py [options]
 
 Common:
 ```bash
-python3 scripts/recall.py                  # current session → recall-simple.html
-python3 scripts/recall.py --view talk      # pure conversation (cleanest)
-python3 scripts/recall.py --scope all      # all history → ./session-export/ + index.html
-python3 scripts/recall.py --scope init-all # backfill all history into the archive + index.html
+python3 scripts/recall.py                       # current session → recall-talk.html (talk, default)
+python3 scripts/recall.py --view simple         # conversation + one-line tool summaries
+python3 scripts/recall.py --view full           # verbatim + tool bodies
+python3 scripts/recall.py --scope all           # all history → ./session-export/ + index.html
+python3 scripts/recall.py --scope init-all      # backfill all history (talk) into the archive + index.html
+python3 scripts/recall.py --scope init-all --views simple,talk,full   # backfill all three views
 ```
 
 ### Choosing a view
-- **simple** (default): conversation + one-line tool summaries (`• Update(file)`). For review / finding loose ends. Filters injected meta, merges consecutive same-role turns.
-- **talk**: only user/assistant text, tools hidden. For reading the narrative.
+- **talk** (default): only user/assistant text, tools hidden. For reading the narrative — the cleanest, lowest-noise view.
+- **simple**: conversation + one-line tool summaries (`• Update(file)`). For review / finding loose ends. Filters injected meta, merges consecutive same-role turns.
 - **full**: verbatim + tool body + tool_result, meta preserved, 1:1. For audit / reproduction.
+
+To produce **simple / full / all** views: pass `--view simple` or `--view full` (current/all scope), `--views simple,talk,full` (init-all scope), or set `views` in `archive.conf.json` for the auto-archive hook.
 
 ### scope=all vs scope=init-all
 - `all` writes one view to `./session-export/` in the current dir (throwaway export).
-- `init-all` backfills all history into `~/.claude/session-archive/<project>/<view>/`, always simple+talk, merged with the auto-archive tree, plus a top-level `index.html` (each row links `[simple] [talk]`). Idempotent; `--force` rebuilds; re-run to refresh.
+- `init-all` backfills all history into `~/.claude/session-archive/<project>/` (flat, talk by default; `--views` to add more), merged with the auto-archive tree, plus a top-level `index.html`. Multiple views are disambiguated by filename suffix (`<base>.html` / `<base>.simple.html` / `<base>.full.html`). Idempotent; `--force` rebuilds; re-run to refresh.
 
 ## Architecture: thin wrapper, token-free core
 
@@ -70,9 +75,21 @@ python3 scripts/recall.py --scope init-all # backfill all history into the archi
 ## Auto-archive (SessionEnd / SessionStart hooks)
 
 Register via `install.sh` into `~/.claude/settings.json` (takes effect next session):
-- **SessionEnd** → `scripts/session_end_archive.py`: save the conversation as **simple + talk HTML** to `~/.claude/session-archive/<project>/<view>/`. fail-open, never blocks session end.
+- **SessionEnd** → `scripts/session_end_archive.py`: save the conversation as **talk HTML** (default) to `~/.claude/session-archive/<project>/` (flat, no view subfolder). fail-open, never blocks session end.
 - **SessionStart** → `scripts/session_start_reminder.py`: a one-line reminder of where archives go.
-- Controlled by `archive.conf.json` (`enabled` / `archive_dir` / `views` / `format` / `timestamps`). Set `enabled` false to disable.
+- Controlled by `archive.conf.json` (`enabled` / `archive_dir` / `views` / `format` / `timestamps`). Set `enabled` false to disable. To also archive simple/full, set `"views": ["simple","talk"]` (or add `"full"`) — extra views land as `<base>.simple.html` / `<base>.full.html` alongside the talk file.
+
+### Regenerate / backfill / rebuild
+
+The SessionEnd hook only fires **at the moment a session ends** — it never re-scans history on its own. So gaps happen (hook was disabled, a crash, sessions from before install). The scan/backfill mechanism is `--scope init-all`:
+
+| Goal | Command | Behavior |
+|------|---------|----------|
+| **Backfill** missing sessions | `recall.py --scope init-all` | Scans all `~/.claude/projects/*/*.jsonl`; writes only files that don't exist yet, **skips existing** (idempotent — safe to re-run anytime). |
+| **Rebuild** everything (e.g. after a render change) | `recall.py --scope init-all --force` | Ignores existing files and rewrites all of them. |
+| Re-archive one current session | `recall.py --transcript <jsonl> --output <path>` | Always overwrites that one file. |
+
+Note: each archive file is keyed by `<date>_<time>_<slug>_<id8>`, so re-running `init-all` matches existing files by name and skips them. There is no automatic periodic backfill — run `init-all` manually (or wire it into your own cron/hook) to catch up.
 
 Note: the assistant label shows the actual model name (e.g. `claude-opus-4-8`); synthetic messages fall back to `ASSISTANT`.
 

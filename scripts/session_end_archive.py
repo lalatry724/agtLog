@@ -7,8 +7,9 @@
 payload 取用：transcript_path（缺則用 cwd+session_id 推導）、cwd、session_id。
 設定檔（選用）：~/.claude/skills/recall/archive.conf.json
   { "enabled": true, "archive_dir": "~/.claude/session-archive",
-    "views": ["simple", "talk"], "format": "html", "timestamps": true }
-每個 view 各自一資料夾：<archive>/<專案>/<view>/<date>_<slug>_<id8>.<ext>。
+    "views": ["talk"], "format": "html", "timestamps": true }
+扁平結構：<archive>/<專案>/<date>_<slug>_<id8>[.<view>].<ext>（預設只產 talk，不加後綴、不分子資料夾）。
+若要連 simple/full 一起產：在 archive.conf.json 把 "views" 設成 ["simple","talk"]（或加 "full"）。
 """
 from __future__ import annotations
 import json
@@ -24,7 +25,7 @@ SK = Path(__file__).resolve().parent
 sys.path.insert(0, str(SK))
 
 DEFAULTS = {"enabled": True, "archive_dir": "~/.claude/session-archive",
-            "views": ["simple", "talk"], "format": "html", "timestamps": True}
+            "views": ["talk"], "format": "html", "timestamps": True}
 
 
 def _load_conf() -> dict:
@@ -49,7 +50,7 @@ def main() -> int:
         return 0
 
     import render_core as rc
-    from recall import run_current, _session_meta, _archive_base
+    from recall import run_current, _session_meta, _archive_base, archive_filename
 
     cwd = payload.get("cwd") or ""
     session_id = payload.get("session_id") or ""
@@ -74,10 +75,10 @@ def main() -> int:
         ext = "html" if fmt == "html" else "txt"
         archive_root = Path(conf["archive_dir"]).expanduser()
         base = _archive_base(meta["start"], meta["first_prompt"], transcript.stem)
-        for view in conf.get("views", ["simple", "talk"]):  # 各 view 各自一資料夾
-            archive = archive_root / proj / view             # <archive>/<專案>/<view>/
-            archive.mkdir(parents=True, exist_ok=True)
-            out = archive / f"{base}.{ext}"
+        archive = archive_root / proj                         # 扁平：<archive>/<專案>/
+        archive.mkdir(parents=True, exist_ok=True)
+        for view in conf.get("views", ["talk"]):  # 預設僅 talk；多 view 以檔名後綴區分
+            out = archive / archive_filename(base, view, ext)
             run_current(cwd or str(SK), str(transcript), view, fmt,
                         conf.get("timestamps", True), False, 0, 80, str(out))
     except Exception:

@@ -8,6 +8,12 @@ session-export/
 recall*.html
 recall*.txt
 
+# local dev artifacts (auto-generated, not part of the public skill)
+devlog.md
+userChatLog.md
+.gemini/
+_internal/
+
 # OS
 .DS_Store
 Thumbs.db
