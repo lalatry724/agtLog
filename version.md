@@ -2,6 +2,14 @@
 
 本檔記錄 agtLog skill 的所有版本異動。最新在上。
 
+## v1.5.0 — 2026-06-23
+
+`index.html` 每列加 remove 鈕：在索引頁直接標記要清掉的對話，套用後封存＋拉黑。
+
+- **索引頁 remove 鈕（前端）**：`init-all` 產的 `index.html` 每列前多一顆 ✕。按下標記該則（變暗＋刪除線、存 `localStorage`），底部固定面板統計待移除數並產出一條可複製的套用指令。純 vanilla JS、無外部相依，`file://` 雙擊即可用；複製走 `navigator.clipboard`，失敗自動 fallback `execCommand`。
+- **套用指令 `--scope remove --items proj:stem,proj:stem,...`**：把選定 session 的歸檔檔**移到 `<archive>/<專案>/_removed/`**（封存非刪，可手動救回）並加入黑名單，最後自動重建索引——之後 `init-all` / SessionEnd hook 不再產出該則。
+- **設計取捨**：靜態 HTML 受瀏覽器沙箱限制無法自行搬檔/寫黑名單，故採「前端標記 → 複製指令 → 終端機套用」兩段式；黑名單與 `reset` 救回機制沿用 v1.4.0 的 `catalog.py`，零新狀態檔。
+
 ## v1.4.0 — 2026-06-23
 
 新增「對話記錄 整理 / 清理」機制：歸檔黑名單 + 每專案記錄檔 + 全域目錄加檔案大小。

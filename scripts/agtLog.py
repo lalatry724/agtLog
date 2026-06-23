@@ -23,6 +23,7 @@ import html
 import json
 import os
 import re
+import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -292,7 +293,7 @@ def run_init_all(projects_dir, archive_dir, views, fmt, show_ts, include_subagen
                                    start=start, end=meta["end"] or "")
             records.append({"project": proj, "start": start, "end": meta["end"],
                             "turns": turns_seen, "title": title, "views": view_rels,
-                            "bytes": total_bytes})
+                            "bytes": total_bytes, "stem": jl.stem})
         except Exception as e:
             errors.append(f"{jl}: {type(e).__name__}: {e}")
 
@@ -314,6 +315,51 @@ def run_init_all(projects_dir, archive_dir, views, fmt, show_ts, include_subagen
             "skipped": skipped, "blacklisted": blacklisted, "errors": errors}
 
 
+# index.html 內嵌的 remove UI 腳本（純 vanilla JS，file:// 沙箱可跑、無外部相依）。
+# 點 ✕ 把 proj/stem 記到 localStorage 並標記該列；底部面板產出 `--scope remove` 指令供複製。
+_INDEX_JS = r"""<script>
+(function(){
+  var KEY='agtLog.rmQueue';
+  var py=(navigator.platform||'').indexOf('Win')>=0?'python':'python3';
+  var SCRIPT='~/.claude/skills/agtLog/scripts/agtLog.py';
+  function load(){try{return new Set(JSON.parse(localStorage.getItem(KEY)||'[]'));}catch(e){return new Set();}}
+  function save(s){try{localStorage.setItem(KEY,JSON.stringify(Array.from(s)));}catch(e){}}
+  var queue=load();
+  var rows=Array.prototype.slice.call(document.querySelectorAll('.row'));
+  var bar=document.getElementById('rmbar'),cmd=document.getElementById('rmcmd'),cnt=document.getElementById('rmcount');
+  function key(row){return row.getAttribute('data-proj')+'\t'+row.getAttribute('data-stem');}
+  function render(){
+    rows.forEach(function(row){
+      var on=queue.has(key(row));
+      row.classList.toggle('pending',on);
+      var b=row.querySelector('.rm'); if(b) b.textContent=on?'↩':'✕';
+    });
+    if(queue.size===0){bar.classList.remove('on');return;}
+    bar.classList.add('on');
+    cnt.textContent='待移除 '+queue.size+' 則';
+    var items=Array.from(queue).map(function(k){var p=k.split('\t');return p[0]+':'+p[1];}).join(',');
+    cmd.value=py+' '+SCRIPT+' --scope remove --items "'+items+'"';
+  }
+  rows.forEach(function(row){
+    var b=row.querySelector('.rm'); if(!b) return;
+    b.addEventListener('click',function(){
+      var k=key(row); if(queue.has(k)) queue.delete(k); else queue.add(k);
+      save(queue); render();
+    });
+  });
+  var copy=document.getElementById('rmcopy');
+  if(copy) copy.addEventListener('click',function(){
+    cmd.select(); var done=function(){copy.textContent='已複製';setTimeout(function(){copy.textContent='複製指令';},1200);};
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(cmd.value).then(done,function(){});}
+    try{if(document.execCommand('copy')) done();}catch(e){}
+  });
+  var clr=document.getElementById('rmclear');
+  if(clr) clr.addEventListener('click',function(){queue.clear();save(queue);render();});
+  render();
+})();
+</script>"""
+
+
 def _init_index(records: list[dict], views: list[str], fmt: str) -> str:
     """init-all 索引：依專案分組，每列一個 session 附各 view 連結。"""
     if fmt != "html":
@@ -330,14 +376,25 @@ def _init_index(records: list[dict], views: list[str], fmt: str) -> str:
         return "\n".join(lines) + "\n"
 
     css = ("body{background:#1e1e2e;color:#cdd6f4;font:14px/1.6 ui-monospace,Menlo,Consolas,monospace;"
-           "max-width:1000px;margin:0 auto;padding:24px}h1{border-bottom:1px solid #45475a;padding-bottom:8px}"
+           "max-width:1000px;margin:0 auto;padding:24px 24px 120px}h1{border-bottom:1px solid #45475a;padding-bottom:8px}"
            "h2{color:#89dceb;margin-top:28px}a{color:#a6e3a1;text-decoration:none}a:hover{text-decoration:underline}"
-           ".row{padding:5px 0;border-bottom:1px solid #313244}.meta{color:#9399b2}"
-           ".v{color:#f9e2af;margin-left:6px}.t{color:#cdd6f4}")
+           ".row{padding:5px 0;border-bottom:1px solid #313244;display:flex;align-items:baseline;gap:6px}.meta{color:#9399b2}"
+           ".v{color:#f9e2af;margin-left:6px}.t{color:#cdd6f4}.row .grow{flex:1}"
+           ".rm{flex:none;cursor:pointer;background:none;border:1px solid #45475a;color:#f38ba8;"
+           "border-radius:4px;font:12px/1 inherit;padding:2px 6px}.rm:hover{background:#45475a}"
+           ".row.pending{opacity:.45}.row.pending .t{text-decoration:line-through}"
+           ".row.pending .rm{color:#a6e3a1;border-color:#a6e3a1}"
+           "#rmbar{position:fixed;left:0;right:0;bottom:0;background:#181825;border-top:1px solid #45475a;"
+           "padding:10px 24px;display:none}#rmbar.on{display:block}#rmbar textarea{width:100%;height:46px;"
+           "background:#11111b;color:#cdd6f4;border:1px solid #45475a;border-radius:4px;font:12px/1.4 inherit;"
+           "padding:6px;box-sizing:border-box;resize:none}#rmbar .ctl{display:flex;gap:10px;align-items:center;margin-top:6px}"
+           "#rmbar button{cursor:pointer;background:#313244;color:#cdd6f4;border:1px solid #45475a;border-radius:4px;"
+           "padding:4px 12px;font:13px/1 inherit}#rmbar button:hover{background:#45475a}#rmcount{color:#f9e2af}")
     out = ["<!DOCTYPE html><html lang='zh-Hant'><head><meta charset='utf-8'>",
            f"<title>歷史對話歸檔索引</title><style>{css}</style></head><body>",
            "<h1>Claude Code 歷史對話歸檔索引</h1>",
-           f"<p class='meta'>共 {len(records)} 個 session（依專案、組內新→舊）· 每列附 {'/'.join(views)} 連結</p>"]
+           f"<p class='meta'>共 {len(records)} 個 session（依專案、組內新→舊）· 每列附 {'/'.join(views)} 連結"
+           " · 按 ✕ 標記移除，再依底部指令套用</p>"]
     cur = None
     for r in records:
         if r["project"] != cur:
@@ -346,8 +403,18 @@ def _init_index(records: list[dict], views: list[str], fmt: str) -> str:
         links = "".join(f"<a class='v' href='{html.escape(r['views'][v])}'>[{html.escape(v)}]</a>"
                         for v in views if v in r["views"])
         size = _human_size(r.get("bytes", 0))
-        out.append(f"<div class='row'><span class='t'>{html.escape(r['title'][:70])}</span>{links}"
-                   f"<span class='meta'> — {html.escape(_range(r))} · {r['turns']} turns · {html.escape(size)}</span></div>")
+        stem = html.escape(r.get("stem", ""), quote=True)
+        proj = html.escape(r.get("project", ""), quote=True)
+        out.append(f"<div class='row' data-proj=\"{proj}\" data-stem=\"{stem}\">"
+                   f"<button class='rm' title='標記移除/復原'>✕</button>"
+                   f"<span class='grow'><span class='t'>{html.escape(r['title'][:70])}</span>{links}"
+                   f"<span class='meta'> — {html.escape(_range(r))} · {r['turns']} turns · {html.escape(size)}</span></span></div>")
+    out.append("<div id='rmbar'><span id='rmcount'></span>"
+               "<textarea id='rmcmd' readonly onclick='this.select()'></textarea>"
+               "<div class='ctl'><button id='rmcopy'>複製指令</button>"
+               "<button id='rmclear'>清空標記</button>"
+               "<span class='meta'>貼到終端機執行：封存到 _removed/ 並拉黑（之後不再產出；reset 可救回）</span></div></div>")
+    out.append(_INDEX_JS)
     out.append("</body></html>")
     return "\n".join(out) + "\n"
 
@@ -407,9 +474,66 @@ def run_reset(archive_dir, project) -> dict:
             "unblacklisted": freed, "hint": "跑 --scope init-all 重新生成"}
 
 
+def run_remove(archive_dir, items_str, projects_dir) -> dict:
+    """index.html remove 鈕的套用端：把選定 session 的歸檔檔移到 <archive>/<proj>/_removed/，
+    加入黑名單（init-all / SessionEnd hook 不再產），最後重建索引。
+    --items 格式：proj:stem,proj:stem,...（proj 為歸檔資料夾名、stem 為 session UUID）。"""
+    root = Path(archive_dir).expanduser()
+    if not items_str or not items_str.strip():
+        return {"status": "fail", "error": "remove 需要 --items（格式 proj:stem,proj:stem,...）"}
+    by_proj: dict = {}
+    errors: list = []
+    for tok in items_str.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        proj, sep, stem = tok.partition(":")
+        proj, stem = proj.strip(), stem.strip()
+        if not sep or not proj or not stem:
+            errors.append(f"格式錯誤: {tok}")
+            continue
+        by_proj.setdefault(proj, []).append(stem)
+    if not by_proj:
+        return {"status": "fail", "error": "--items 無有效項目（需 proj:stem）", "bad": errors}
+
+    moved = blacklisted = 0
+    results = []
+    for proj, stems in by_proj.items():
+        d = root / proj
+        if not d.is_dir():
+            errors.append(f"找不到專案資料夾: {d}")
+            continue
+        cat = catalog.load(d)
+        removed_dir = d / "_removed"
+        pm = 0
+        for stem in stems:
+            rec = cat.get("sessions", {}).get(stem)
+            files = list((rec or {}).get("views", {}).values()) if rec else []
+            if not files:  # fallback：catalog 無記錄 → 用 id8 撈該 session 各 view 檔
+                files = [p.name for p in d.glob(f"*{stem[:8]}*") if p.is_file()]
+            for f in files:
+                src = d / f
+                if src.exists():
+                    removed_dir.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(src), str(removed_dir / src.name))
+                    pm += 1
+            blacklisted += catalog.add_to_blacklist(cat, [stem])
+        catalog.save(d, cat)
+        moved += pm
+        results.append({"project": proj, "stems": len(stems), "files_moved": pm})
+
+    # 重建索引：黑名單已生效、檔已移走 → 新 index 不含被移除的列
+    conf = _load_archive_conf()
+    idx = run_init_all(projects_dir, str(root), conf.get("views", ["talk"]),
+                       conf.get("format", "html"), conf.get("timestamps", True), False, False)
+    return {"status": "ok", "scope": "remove", "archive_dir": str(root),
+            "moved": moved, "blacklisted": blacklisted, "projects": results,
+            "errors": errors, "index": idx.get("index")}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--scope", choices=["current", "all", "init-all", "tidy", "reset"], default="current")
+    ap.add_argument("--scope", choices=["current", "all", "init-all", "tidy", "reset", "remove"], default="current")
     ap.add_argument("--view", choices=["full", "simple", "talk"], default="talk")
     ap.add_argument("--views", help="init-all 專用：逗號分隔多 view 覆寫 conf（例 simple,talk,full）")
     ap.add_argument("--format", choices=["html", "txt"], default="html")
@@ -420,6 +544,7 @@ def main() -> int:
     ap.add_argument("--force", action="store_true", help="init-all：強制重建已存在的歸檔")
     ap.add_argument("--project", help="tidy/reset：限定某專案歸檔資料夾名（reset 必填）")
     ap.add_argument("--confirm", action="store_true", help="tidy：拉黑數超門檻時確認執行")
+    ap.add_argument("--items", help="remove 專用：proj:stem,proj:stem,... 由 index.html remove 鈕產生")
     ap.add_argument("--max-result-chars", type=int, default=0)
     ap.add_argument("--arg-width", type=int, default=80)
     ap.add_argument("--cwd", default=os.environ.get("PWD") or os.getcwd())
@@ -442,11 +567,13 @@ def main() -> int:
             views = conf.get("views", ["talk"])
         result = run_init_all(args.projects_dir, archive_dir, views, args.format,
                               args.timestamps, args.include_subagents, args.force)
-    elif args.scope in ("tidy", "reset"):
+    elif args.scope in ("tidy", "reset", "remove"):
         conf = _load_archive_conf()
         archive_dir = args.output_dir or conf.get("archive_dir", "~/.claude/session-archive")
         if args.scope == "tidy":
             result = run_tidy(archive_dir, args.project, args.confirm)
+        elif args.scope == "remove":
+            result = run_remove(archive_dir, args.items, args.projects_dir)
         else:
             result = run_reset(archive_dir, args.project)
     else:
