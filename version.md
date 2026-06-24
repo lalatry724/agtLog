@@ -2,6 +2,14 @@
 
 本檔記錄 agtLog skill 的所有版本異動。最新在上。
 
+## v1.5.2 — 2026-06-24
+
+`index.html` 低價值對話亮色：turns ≤ 10 或 size ≤ 10KB 的列，該欄以亮橘色（`#fab387`）粗體標示，方便一眼挑出可清理的短/小對話。
+
+- **兩條件獨立判斷**：`turns ≤ 10` 標亮 turns 欄、`bytes ≤ 10*1024`（10KB，1024 進位同 `_human_size`）標亮 size 欄，各自獨立；門檻常數 `LOW_TURNS` / `LOW_BYTES` 在 `agtLog.py`。
+- **純 init-index 渲染變更**：只動 `_init_index` 的 HTML 分支與其內嵌 CSS（新增 `.lo` class），不影響 session 本文渲染（`render_core.py` 未動）；md 格式索引不受影響。
+- 搭配 v1.5.0 的 ✕ remove 鈕：亮色標示候選 → ✕ 標記 → 套用指令清理，整條清理動線更順。
+
 ## v1.5.1 — 2026-06-24
 
 新增 `deploy.sh` / `deploy.ps1` 雙版本部署腳本：把開發 repo 同步進 live skill 資料夾。

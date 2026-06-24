@@ -20,7 +20,7 @@
 
 兩條路殊途同歸（都封存＋拉黑、`reset` 都能救回）：
 
-**A. 在 `index.html` 按鈕清（推薦）**：開歸檔區的 `index.html`，每列前的 ✕ 按下標記要清的對話，底部面板會生一條套用指令——複製到終端機跑一次即生效。指令長這樣（按鈕自動產生，含對的 `proj:stem`）：
+**A. 在 `index.html` 按鈕清（推薦）**：開歸檔區的 `index.html`，每列前的 ✕ 按下標記要清的對話，底部面板會生一條套用指令——複製到終端機跑一次即生效。（列的 turns ≤ 10 或 size ≤ 10KB 會以**亮橘色**標示，方便挑出低價值的短/小對話。）指令長這樣（按鈕自動產生，含對的 `proj:stem`）：
 
 ```
 python scripts/agtLog.py --scope remove --items "<proj>:<stem>,<proj>:<stem>"

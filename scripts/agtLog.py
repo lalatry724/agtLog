@@ -360,6 +360,11 @@ _INDEX_JS = r"""<script>
 </script>"""
 
 
+# index.html 低價值對話亮色門檻（turns/size ≤ 門檻 → 標亮，便於挑出可清理的對話）
+LOW_TURNS = 10
+LOW_BYTES = 10 * 1024  # 10 KB（與 _human_size 同為 1024 進位）
+
+
 def _init_index(records: list[dict], views: list[str], fmt: str) -> str:
     """init-all 索引：依專案分組，每列一個 session 附各 view 連結。"""
     if fmt != "html":
@@ -379,7 +384,7 @@ def _init_index(records: list[dict], views: list[str], fmt: str) -> str:
            "max-width:1000px;margin:0 auto;padding:24px 24px 120px}h1{border-bottom:1px solid #45475a;padding-bottom:8px}"
            "h2{color:#89dceb;margin-top:28px}a{color:#a6e3a1;text-decoration:none}a:hover{text-decoration:underline}"
            ".row{padding:5px 0;border-bottom:1px solid #313244;display:flex;align-items:baseline;gap:6px}.meta{color:#9399b2}"
-           ".v{color:#f9e2af;margin-left:6px}.t{color:#cdd6f4}.row .grow{flex:1}"
+           ".v{color:#f9e2af;margin-left:6px}.t{color:#cdd6f4}.lo{color:#fab387;font-weight:600}.row .grow{flex:1}"
            ".rm{flex:none;cursor:pointer;background:none;border:1px solid #45475a;color:#f38ba8;"
            "border-radius:4px;font:12px/1 inherit;padding:2px 6px}.rm:hover{background:#45475a}"
            ".row.pending{opacity:.45}.row.pending .t{text-decoration:line-through}"
@@ -402,13 +407,18 @@ def _init_index(records: list[dict], views: list[str], fmt: str) -> str:
             out.append(f"<h2>{html.escape(cur)}</h2>")
         links = "".join(f"<a class='v' href='{html.escape(r['views'][v])}'>[{html.escape(v)}]</a>"
                         for v in views if v in r["views"])
-        size = _human_size(r.get("bytes", 0))
+        nbytes = r.get("bytes", 0)
+        size = _human_size(nbytes)
         stem = html.escape(r.get("stem", ""), quote=True)
         proj = html.escape(r.get("project", ""), quote=True)
+        turns_html = (f"<span class='lo'>{r['turns']} turns</span>"
+                      if r["turns"] <= LOW_TURNS else f"{r['turns']} turns")
+        size_html = (f"<span class='lo'>{html.escape(size)}</span>"
+                     if nbytes <= LOW_BYTES else html.escape(size))
         out.append(f"<div class='row' data-proj=\"{proj}\" data-stem=\"{stem}\">"
                    f"<button class='rm' title='標記移除/復原'>✕</button>"
                    f"<span class='grow'><span class='t'>{html.escape(r['title'][:70])}</span>{links}"
-                   f"<span class='meta'> — {html.escape(_range(r))} · {r['turns']} turns · {html.escape(size)}</span></span></div>")
+                   f"<span class='meta'> — {html.escape(_range(r))} · {turns_html} · {size_html}</span></span></div>")
     out.append("<div id='rmbar'><span id='rmcount'></span>"
                "<textarea id='rmcmd' readonly onclick='this.select()'></textarea>"
                "<div class='ctl'><button id='rmcopy'>複製指令</button>"
