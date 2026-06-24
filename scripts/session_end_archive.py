@@ -87,7 +87,8 @@ def main() -> int:
         for view in conf.get("views", ["talk"]):  # 預設僅 talk；多 view 以檔名後綴區分
             fname = archive_filename(base, view, ext)
             r = run_current(cwd or str(SK), str(transcript), view, fmt,
-                            conf.get("timestamps", True), False, 0, 80, str(archive / fname))
+                            conf.get("timestamps", True), False, 0, 80, str(archive / fname),
+                            proj=proj, stem=transcript.stem)
             if isinstance(r, dict) and r.get("status") == "ok":
                 view_rels[view] = fname
                 turns_seen = max(turns_seen, r.get("turns", 0))

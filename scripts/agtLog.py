@@ -55,7 +55,8 @@ def _human_size(n: int) -> str:
     return f"{n} B"
 
 
-def run_current(cwd, transcript, view, fmt, show_ts, include_thinking, max_result_chars, arg_width, output) -> dict:
+def run_current(cwd, transcript, view, fmt, show_ts, include_thinking, max_result_chars, arg_width, output,
+                proj=None, stem=None) -> dict:
     if transcript:
         tp = Path(transcript).expanduser()
         if not tp.is_file():
@@ -65,7 +66,8 @@ def run_current(cwd, transcript, view, fmt, show_ts, include_thinking, max_resul
         if tp is None:
             return {"status": "fail", "error": "找不到任何 transcript jsonl"}
 
-    body, turns = rc.render(tp, view, fmt, show_ts, include_thinking, max_result_chars, arg_width)
+    body, turns = rc.render(tp, view, fmt, show_ts, include_thinking, max_result_chars, arg_width,
+                            proj=proj, stem=stem)
     out_path = Path(output).expanduser() if output else Path(cwd) / _default_name(view, fmt)
     out_path.write_text(body, encoding="utf-8")
     return {"status": "ok", "scope": "current", "transcript": str(tp), "output": str(out_path),
@@ -272,7 +274,7 @@ def run_init_all(projects_dir, archive_dir, views, fmt, show_ts, include_subagen
             for view in views:
                 # 一律 render（純 Python，便宜）以取得 turns；僅在缺檔/強制時才寫盤
                 body, turns = rc.render(jl, view, fmt, show_ts, False, 0, 80,
-                                        title=f"{proj} — {jl.stem}")
+                                        title=f"{proj} — {jl.stem}", proj=proj, stem=jl.stem)
                 if turns == 0:
                     continue
                 turns_seen = max(turns_seen, turns)

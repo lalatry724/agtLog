@@ -2,6 +2,15 @@
 
 本檔記錄 agtLog skill 的所有版本異動。最新在上。
 
+## v1.6.0 — 2026-06-24
+
+對話 HTML 頁內加工具列：**隱藏 AI 回覆** toggle ＋ **移除此對話** 鈕。
+
+- **隱藏 AI 回覆（全情境）**：頁頂 sticky 工具列一顆鈕，toggle `body.hide-asst` → CSS `body.hide-asst .turn.assistant{display:none}` 只留使用者發言，再按一下還原。純 CSS/JS、無相依，full/simple/talk 三視圖皆有。
+- **移除此對話（僅歸檔檔）**：完全比照 `index.html` 的 ✕ 機制——單一 session 版。按下標記後底部固定面板產出可複製的 `--scope remove --items "<proj>:<stem>"` 指令，貼終端機套用（封存到 `_removed/` ＋拉黑＋重建索引）。瀏覽器沙箱無法直接刪檔，故沿用「標記→複製指令→終端機套用」兩段式。
+- **顯示條件**：remove 鈕只在 HTML 帶有歸檔身份（`proj`/`stem`）時出現——即 SessionEnd hook 與 `init-all` 產到 `~/.claude/session-archive/` 的檔。當前 session 直出專案夾的 `agtLog-talk.html` 不在歸檔內，只有隱藏 AI 鈕。
+- **改動範圍**：`render_core.py`（新增 `_toolbar_html`/`_toolbar_js`、`emit_html`/`render` 加 `proj`/`stem` 參數、`_HTML_CSS` 加工具列/隱藏/rmbar 樣式）；`agtLog.py`（`run_current` 加 `proj`/`stem`、`init-all` 傳身份）；`session_end_archive.py`（hook 傳 `proj`/`stem`）。
+
 ## v1.5.2 — 2026-06-24
 
 `index.html` 低價值對話亮色：turns ≤ 10 或 size ≤ 10KB 的列，該欄以亮橘色（`#fab387`）粗體標示，方便一眼挑出可清理的短/小對話。

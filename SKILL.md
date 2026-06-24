@@ -62,6 +62,11 @@ python3 scripts/agtLog.py --scope init-all --views simple,talk,full   # backfill
 
 To produce **simple / full / all** views: pass `--view simple` or `--view full` (current/all scope), `--views simple,talk,full` (init-all scope), or set `views` in `archive.conf.json` for the auto-archive hook.
 
+### In-page toolbar (HTML output)
+Every conversation HTML has a sticky top toolbar:
+- **隱藏 AI 回覆 (Hide AI replies)** — toggles a body class that hides every `.turn.assistant`, leaving only the user's turns; click again to restore. Pure CSS/JS, works in any view, even opened standalone from disk.
+- **移除此對話 (Remove this conversation)** — only present on **archived** files (those carrying a `proj`/`stem` identity, i.e. produced by the SessionEnd hook or `init-all` into `~/.claude/session-archive/`). It mirrors the `index.html` ✕ flow for a single session: clicking marks the file and a bottom bar builds a copy-paste `--scope remove --items "<proj>:<stem>"` command to run in the terminal (browser sandbox can't delete files directly). The current-session `agtLog-talk.html` written into the project dir is not archived, so it shows only the Hide-AI button.
+
 ### scope=all vs scope=init-all
 - `all` writes one view to `./session-export/` in the current dir (throwaway export).
 - `init-all` backfills all history into `~/.claude/session-archive/<project>/` (flat, talk by default; `--views` to add more), merged with the auto-archive tree, plus a top-level `index.html`. Multiple views are disambiguated by filename suffix (`<base>.html` / `<base>.simple.html` / `<base>.full.html`). Idempotent; `--force` rebuilds; re-run to refresh.

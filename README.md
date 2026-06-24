@@ -105,6 +105,13 @@ Output is a JSON status line on stdout (`status == "ok"` on success, with `outpu
 
 To get **simple / full / all** views: pass `--view simple` / `--view full` (current/all), `--views simple,talk,full` (init-all), or set `views` in `archive.conf.json` for the auto-archive hook.
 
+### In-page toolbar (HTML output)
+
+Every conversation HTML carries a sticky toolbar at the top:
+
+- **Hide AI replies** — one click hides every assistant turn, leaving just what *you* said; click again to bring them back. Pure CSS/JS, works in any view straight from `file://`.
+- **Remove this conversation** — appears only on **archived** files (those produced by the SessionEnd hook or `init-all` into `~/.claude/session-archive/`). It is the single-session twin of the `index.html` ✕ button: clicking marks the file, and a bottom bar builds a copy-paste `--scope remove --items "<proj>:<stem>"` command to run in the terminal (the browser sandbox can't delete files, so it's the same mark-then-apply flow). The throwaway `agtLog-talk.html` written into your project dir isn't archived, so it shows only the Hide-AI button.
+
 ### scope=all vs scope=init-all
 
 - `--scope all` writes one chosen view into `./session-export/` in the current directory — a throwaway export.

@@ -356,14 +356,92 @@ h1{font-size:15px;border-bottom:1px solid var(--line);padding-bottom:8px;margin:
 table.md{border-collapse:collapse;margin:8px 0;white-space:normal;max-width:100%}
 table.md th,table.md td{border:1px solid var(--line);padding:4px 10px;text-align:left;vertical-align:top}
 table.md th{color:var(--user);background:#181825;font-weight:700}
+.bar{position:sticky;top:0;z-index:10;background:var(--bg);border-bottom:1px solid var(--line);
+padding:8px 0;margin:0 0 16px;display:flex;gap:8px;flex-wrap:wrap}
+.bar button{cursor:pointer;background:#313244;color:var(--fg);border:1px solid var(--line);
+border-radius:4px;padding:4px 12px;font:13px/1 inherit}.bar button:hover{background:var(--line)}
+.bar .rm{color:#f38ba8;border-color:#f38ba8}.bar .rm.on{color:#a6e3a1;border-color:#a6e3a1}
+body.hide-asst .turn.assistant{display:none}
+body.has-rm{padding-bottom:130px}
+#rmbar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:#181825;border-top:1px solid var(--line);
+padding:10px 24px;display:none}#rmbar.on{display:block}
+#rmbar textarea{width:100%;max-width:1000px;height:46px;background:#11111b;color:var(--fg);
+border:1px solid var(--line);border-radius:4px;font:12px/1.4 inherit;padding:6px;box-sizing:border-box;resize:none}
+#rmbar .ctl{display:flex;gap:10px;align-items:center;margin-top:6px;flex-wrap:wrap}
+#rmbar button{cursor:pointer;background:#313244;color:var(--fg);border:1px solid var(--line);
+border-radius:4px;padding:4px 12px;font:13px/1 inherit}#rmbar button:hover{background:var(--line)}
+#rmcount{color:var(--tool)}#rmbar .meta{color:var(--result)}
 """.strip()
 
 
-def emit_html(turns: list[dict], view: str, title: str, show_ts: bool = True) -> str:
+# ── 頁內工具列：隱藏 AI 回覆 toggle（全情境）＋ remove 鈕（僅歸檔檔有 proj/stem）──
+# remove 完全比照 index.html：標記 → 底部產出可複製的 `--scope remove` 指令貼終端機執行
+# （file:// 沙箱無法直接刪檔）。proj/stem 缺省（如當前 session 直出專案夾）→ 只有隱藏 AI 鈕。
+def _toolbar_html(proj: str | None, stem: str | None) -> str:
+    has_rm = bool(proj and stem)
+    buttons = ["<button id='toggleAsst'>隱藏 AI 回覆</button>"]
+    if has_rm:
+        buttons.append("<button class='rm' id='rmbtn'>✕ 移除此對話</button>")
+    bar = f"<div class='bar'>{''.join(buttons)}</div>"
+    if not has_rm:
+        return bar
+    bar += ("<div id='rmbar'><span id='rmcount'></span>"
+            "<textarea id='rmcmd' readonly onclick='this.select()'></textarea>"
+            "<div class='ctl'><button id='rmcopy'>複製指令</button>"
+            "<button id='rmcancel'>取消</button>"
+            "<span class='meta'>貼到終端機執行：封存到 _removed/ 並拉黑（之後不再產出；reset 可救回）</span>"
+            "</div></div>")
+    return bar
+
+
+def _toolbar_js(proj: str | None, stem: str | None) -> str:
+    has_rm = bool(proj and stem)
+    item = json.dumps(f"{proj}:{stem}") if has_rm else "null"
+    return f"""<script>
+(function(){{
+  var t=document.getElementById('toggleAsst');
+  if(t)t.addEventListener('click',function(){{
+    var on=document.body.classList.toggle('hide-asst');
+    t.textContent=on?'顯示 AI 回覆':'隱藏 AI 回覆';
+  }});
+  var ITEM={item};
+  var rb=document.getElementById('rmbtn'),bar=document.getElementById('rmbar'),
+      cmd=document.getElementById('rmcmd'),cnt=document.getElementById('rmcount');
+  if(ITEM&&rb&&bar){{
+    var py=(navigator.platform||'').indexOf('Win')>=0?'python':'python3';
+    var SCRIPT='~/.claude/skills/agtLog/scripts/agtLog.py';
+    var marked=false;
+    function render(){{
+      rb.classList.toggle('on',marked);
+      rb.textContent=marked?'↩ 取消移除':'✕ 移除此對話';
+      if(marked){{bar.classList.add('on');cnt.textContent='待移除此對話 →';
+        cmd.value=py+' '+SCRIPT+' --scope remove --items "'+ITEM+'"';}}
+      else bar.classList.remove('on');
+    }}
+    rb.addEventListener('click',function(){{marked=!marked;render();}});
+    var copy=document.getElementById('rmcopy');
+    if(copy)copy.addEventListener('click',function(){{
+      cmd.select();var done=function(){{copy.textContent='已複製';
+        setTimeout(function(){{copy.textContent='複製指令';}},1200);}};
+      if(navigator.clipboard&&navigator.clipboard.writeText){{navigator.clipboard.writeText(cmd.value).then(done,function(){{}});}}
+      try{{if(document.execCommand('copy'))done();}}catch(e){{}}
+    }});
+    var cancel=document.getElementById('rmcancel');
+    if(cancel)cancel.addEventListener('click',function(){{marked=false;render();}});
+  }}
+}})();
+</script>"""
+
+
+def emit_html(turns: list[dict], view: str, title: str, show_ts: bool = True,
+              proj: str | None = None, stem: str | None = None) -> str:
     # full 視圖逐字 1:1；simple/talk 把 markdown 表格轉成真表格
     convert_tables = view != "full"
+    body_cls = "has-rm" if (proj and stem) else ""
     out = ["<!DOCTYPE html><html lang='zh-Hant'><head><meta charset='utf-8'>",
-           f"<title>{html.escape(title)}</title><style>{_HTML_CSS}</style></head><body>",
+           f"<title>{html.escape(title)}</title><style>{_HTML_CSS}</style></head>",
+           f"<body class='{body_cls}'>",
+           _toolbar_html(proj, stem),
            f"<h1>{html.escape(title)}</h1>"]
     for t in turns:
         role = t["role"]
@@ -373,17 +451,21 @@ def emit_html(turns: list[dict], view: str, title: str, show_ts: bool = True) ->
             inner = _render_text_html(text) if (kind == "text" and convert_tables) else _esc_paths(text)
             out.append(f"<div class='piece {html.escape(kind)}'>{inner}</div>")
         out.append("</div>")
+    out.append(_toolbar_js(proj, stem))
     out.append("</body></html>")
     return "\n".join(out) + "\n"
 
 
 def render(transcript: Path, view: str, fmt: str, show_ts: bool = True,
            include_thinking: bool = False, max_result_chars: int = 0,
-           arg_width: int = 80, title: str | None = None) -> tuple[str, int]:
-    """一站式：transcript → (body, turn 數)。"""
+           arg_width: int = 80, title: str | None = None,
+           proj: str | None = None, stem: str | None = None) -> tuple[str, int]:
+    """一站式：transcript → (body, turn 數)。
+    proj/stem：歸檔身份（archive 資料夾名 + session UUID）。傳入時 HTML 才顯示 remove 鈕。"""
     turns = collect(transcript, view, include_thinking, max_result_chars, arg_width)
     if fmt == "html":
-        body = emit_html(turns, view, title or f"agtLog ({view}) — {transcript.name}", show_ts)
+        body = emit_html(turns, view, title or f"agtLog ({view}) — {transcript.name}", show_ts,
+                         proj=proj, stem=stem)
     else:
         body = emit_txt(turns, view, show_ts)
     return body, len(turns)
